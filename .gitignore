@@ -1,0 +1,16 @@
+# Xcode build artifacts
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Secrets — NEVER commit
+FlightMenuBar/Config.secret.swift
+
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+*.resolved
