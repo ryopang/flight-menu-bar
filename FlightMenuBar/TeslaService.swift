@@ -30,11 +30,17 @@ class TeslaService: ObservableObject {
     }
 
     func refreshBatteryLevel() async {
-        guard isConnected,
-              let token = await validAccessToken(),
-              let vin = UserDefaults.standard.string(forKey: Config.teslaVehicleVINKey), !vin.isEmpty
-        else { return }
-        var req = URLRequest(url: URL(string: "\(Config.teslaFleetBaseURL)/api/1/vehicles/\(vin)/vehicle_data?endpoints=charge_state")!)
+        guard isConnected, let token = await validAccessToken() else { return }
+
+        // Vehicle ID may not be cached if the fetch failed in a prior session
+        var vehicleID = UserDefaults.standard.string(forKey: Config.teslaVehicleIDKey) ?? ""
+        if vehicleID.isEmpty {
+            await fetchAndCacheVehicleInfo()
+            vehicleID = UserDefaults.standard.string(forKey: Config.teslaVehicleIDKey) ?? ""
+        }
+        guard !vehicleID.isEmpty else { return }
+
+        var req = URLRequest(url: URL(string: "\(Config.teslaFleetBaseURL)/api/1/vehicles/\(vehicleID)/vehicle_data?endpoints=charge_state")!)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200,
@@ -142,7 +148,12 @@ class TeslaService: ObservableObject {
             print("TeslaService: virtual key not added — skipping navigation")
             return
         }
-        guard let vin = UserDefaults.standard.string(forKey: Config.teslaVehicleVINKey), !vin.isEmpty else {
+        var vin = UserDefaults.standard.string(forKey: Config.teslaVehicleVINKey) ?? ""
+        if vin.isEmpty {
+            await fetchAndCacheVehicleInfo()
+            vin = UserDefaults.standard.string(forKey: Config.teslaVehicleVINKey) ?? ""
+        }
+        guard !vin.isEmpty else {
             print("TeslaService: no VIN cached")
             return
         }
@@ -318,9 +329,9 @@ class TeslaService: ObservableObject {
         guard let (data, _) = try? await URLSession.shared.data(for: request),
               let list = try? JSONDecoder().decode(VehicleListResponse.self, from: data),
               let first = list.response?.first else { return }
-        UserDefaults.standard.set(String(first.id),  forKey: Config.teslaVehicleIDKey)
-        UserDefaults.standard.set(first.vin ?? "",   forKey: Config.teslaVehicleVINKey)
-        print("TeslaService: vehicle cached — \(first.display_name ?? "?") VIN=\(first.vin ?? "?")")
+        guard let idStr = first.id_s, !idStr.isEmpty else { return }
+        UserDefaults.standard.set(idStr,          forKey: Config.teslaVehicleIDKey)
+        UserDefaults.standard.set(first.vin ?? "", forKey: Config.teslaVehicleVINKey)
     }
 
     private func wakeVehicle(vin: String, token: String) async {
@@ -371,7 +382,8 @@ class TeslaService: ObservableObject {
     }
 
     private struct VehicleItem: Decodable {
-        let id: Int
+        // Tesla's numeric IDs exceed JSON float precision — use the string form
+        let id_s: String?
         let vin: String?
         let display_name: String?
     }
