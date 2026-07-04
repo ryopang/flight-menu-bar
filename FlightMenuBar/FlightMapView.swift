@@ -6,6 +6,15 @@ struct FlightMapView: View {
     let departure: CLLocationCoordinate2D
     let arrival: CLLocationCoordinate2D
     let position: FlightPosition?
+    // Route depends only on the endpoints — compute the 61-point polyline once
+    private let route: [CLLocationCoordinate2D]
+
+    init(departure: CLLocationCoordinate2D, arrival: CLLocationCoordinate2D, position: FlightPosition?) {
+        self.departure = departure
+        self.arrival   = arrival
+        self.position  = position
+        self.route     = Self.greatCircle(from: departure, to: arrival)
+    }
 
     // .automatic fits the full route on first render; user pan/zoom preserved via @State
     @State private var camera: MapCameraPosition = .automatic
@@ -50,7 +59,7 @@ struct FlightMapView: View {
     var body: some View {
         Map(position: $camera) {
             // Great-circle route — dimmer when no live position; opacity adapts to dark mode
-            MapPolyline(coordinates: routeCoordinates())
+            MapPolyline(coordinates: route)
                 .stroke(Color.accentColor.opacity(routeOpacity), lineWidth: 2)
 
             // Departure marker — hollow ring
@@ -122,7 +131,8 @@ struct FlightMapView: View {
 
     // MARK: - Great-circle interpolation
 
-    private func routeCoordinates() -> [CLLocationCoordinate2D] {
+    private static func greatCircle(from departure: CLLocationCoordinate2D,
+                                    to arrival: CLLocationCoordinate2D) -> [CLLocationCoordinate2D] {
         let r = Double.pi / 180
         let φ1 = departure.latitude  * r,  λ1 = departure.longitude * r
         let φ2 = arrival.latitude    * r,  λ2 = arrival.longitude   * r

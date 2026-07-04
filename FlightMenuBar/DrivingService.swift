@@ -7,7 +7,7 @@ struct DrivingService {
     private init() {}
 
     private static var cachedHome: CLLocationCoordinate2D?
-    private static let homeAddress = "REDACTED_ADDRESS"
+    private static let homeAddress = Secrets.homeAddress
 
     private static let terminalCoordinates: [String: [String: CLLocationCoordinate2D]] = [
         "JFK": [

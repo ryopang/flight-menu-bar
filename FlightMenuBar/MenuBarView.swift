@@ -65,11 +65,15 @@ struct MenuBarView: View {
                 statusBadge
             }
 
-            if appState.arrivalDate != nil {
+            if let arrival = appState.arrivalDate {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(appState.countdownString)
-                        .font(.system(.title2, design: .monospaced).weight(.semibold))
-                        .foregroundStyle(countdownColor)
+                    // TimelineView confines the once-a-second invalidation to this
+                    // text; the rest of the popover (including the map) stays untouched.
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(Self.countdownString(to: arrival, now: context.date))
+                            .font(.system(.title2, design: .monospaced).weight(.semibold))
+                            .foregroundStyle(Self.countdownColor(to: arrival, now: context.date))
+                    }
                     Text("Arrives \(appState.formattedArrivalTime)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -423,9 +427,18 @@ struct MenuBarView: View {
         }
     }
 
-    private var countdownColor: Color {
-        guard let arrival = appState.arrivalDate else { return .primary }
-        let r = arrival.timeIntervalSinceNow
+    private static func countdownString(to arrival: Date, now: Date) -> String {
+        let remaining = arrival.timeIntervalSince(now)
+        guard remaining > 0 else { return "Arrived" }
+        let h = Int(remaining) / 3600
+        let m = (Int(remaining) % 3600) / 60
+        let s = Int(remaining) % 60
+        if h > 0 { return "\(h)h \(m)m \(s)s" }
+        return "\(m)m \(s)s"
+    }
+
+    private static func countdownColor(to arrival: Date, now: Date) -> Color {
+        let r = arrival.timeIntervalSince(now)
         if r <= 0    { return .secondary }
         if r < 3_600 { return .orange }
         return .primary

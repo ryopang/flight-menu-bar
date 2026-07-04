@@ -8,6 +8,14 @@ class NotificationManager {
     private let identifier        = "com.personal.FlightMenuBar.arrival"
     private let leaveByIdentifier = "com.personal.FlightMenuBar.leaveBy"
 
+    // Polling reschedules every 20 min; without this, the immediate "arriving
+    // soon" notification + Bark push would re-fire on every poll in the final hour.
+    private var lastImmediateKey: String?
+
+    func resetImmediateDedup() {
+        lastImmediateKey = nil
+    }
+
     func requestAuthorization() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
@@ -30,6 +38,11 @@ class NotificationManager {
         let arrivalStr = arrivalDate.formatted(date: .omitted, time: .shortened)
 
         if notifyAt <= now {
+            // Key on flight + arrival minute: re-fires only if the arrival time actually changes
+            let key = "\(flightNumber)-\(Int(arrivalDate.timeIntervalSince1970 / 60))"
+            guard key != lastImmediateKey else { return }
+            lastImmediateKey = key
+
             let mins = max(1, Int(remaining / 60))
             content.title = "✈ \(flightNumber) — Arriving Soon"
             content.body  = "Your flight arrives in approximately \(mins) minute\(mins == 1 ? "" : "s")."

@@ -40,6 +40,7 @@ class AppState: ObservableObject {
     private var positionTimer: Timer?
     private var batteryTimer:  Timer?
     private var leaveByTask:   Task<Void, Never>?
+    private var retryTask:     Task<Void, Never>?
 
     init() {
         flightNumber = UserDefaults.standard.string(forKey: Config.lastFlightNumberKey) ?? ""
@@ -56,18 +57,6 @@ class AppState: ObservableObject {
         let m = (Int(remaining) % 3600) / 60
         if h > 0 { return "✈ \(h)h \(m)m" }
         return "✈ \(m)m"
-    }
-
-    var countdownString: String {
-        _ = tick
-        guard let arrival = arrivalDate else { return "" }
-        let remaining = arrival.timeIntervalSinceNow
-        guard remaining > 0 else { return "Arrived" }
-        let h = Int(remaining) / 3600
-        let m = (Int(remaining) % 3600) / 60
-        let s = Int(remaining) % 60
-        if h > 0 { return "\(h)h \(m)m \(s)s" }
-        return "\(m)m \(s)s"
     }
 
     var formattedArrivalTime: String {
@@ -140,12 +129,17 @@ class AppState: ObservableObject {
         NotificationManager.shared.cancelLeaveByNotification()
         leaveByTask?.cancel()
         leaveByTask = nil
+        retryTask?.cancel()
+        retryTask = nil
         stopTimers()
         NotificationManager.shared.cancelNotification()
+        NotificationManager.shared.resetImmediateDedup()
     }
 
     func refreshFlight() async {
         guard isTracking, !flightNumber.isEmpty else { return }
+        retryTask?.cancel()
+        retryTask = nil
         do {
             let result = try await FlightService.shared.fetchFlight(flightNumber: flightNumber)
             arrivalDate          = result.arrivalDate
@@ -165,7 +159,12 @@ class AppState: ObservableObject {
             )
             await refreshDriving()
         } catch {
-            statusMessage = "Refresh failed — retrying in 5m"
+            statusMessage = "Refresh failed — retrying in 5 min"
+            retryTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 300 * 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                await self?.refreshFlight()
+            }
         }
     }
 

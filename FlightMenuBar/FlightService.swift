@@ -55,6 +55,12 @@ private struct FlightResponse: Codable {
     let status: String?
     let number: String?
     let callSign: String?
+    let airline: AirlineInfo?
+}
+
+private struct AirlineInfo: Codable {
+    let iata: String?
+    let icao: String?
 }
 
 private struct FlightEndpoint: Codable {
@@ -143,13 +149,22 @@ struct FlightService {
     static let shared = FlightService()
     private init() {}
 
-    // AeroDataBox uses "2024-01-15 18:00Z" (space separator, no seconds)
+    // AeroDataBox uses "2024-01-15 18:00Z" (space separator, no seconds).
+    // Formatters are expensive to build — create once (thread-safe for parsing).
+    private static let dateFormatters: [DateFormatter] = [
+        "yyyy-MM-dd HH:mmX", "yyyy-MM-dd HH:mm:ssX",
+        "yyyy-MM-dd'T'HH:mmX", "yyyy-MM-dd'T'HH:mm:ssX"
+    ].map { format in
+        let f = DateFormatter()
+        f.dateFormat = format
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }
+
+    private static let isoFormatter = ISO8601DateFormatter()
+
     private func parseDate(_ string: String) -> Date? {
-        for format in ["yyyy-MM-dd HH:mmX", "yyyy-MM-dd HH:mm:ssX",
-                       "yyyy-MM-dd'T'HH:mmX", "yyyy-MM-dd'T'HH:mm:ssX"] {
-            let f = DateFormatter()
-            f.dateFormat = format
-            f.locale = Locale(identifier: "en_US_POSIX")
+        for f in Self.dateFormatters {
             if let d = f.date(from: string) { return d }
         }
         return nil
@@ -241,7 +256,7 @@ struct FlightService {
             flightStatus: resolvedStatus,
             departureCoordinate: deptCoord,
             arrivalCoordinate: arrCoord,
-            callSign: best.callSign,
+            callSign: best.callSign ?? deriveCallSign(flightNumber: normalized, airlineICAO: best.airline?.icao),
             arrivalIATACode: best.arrival?.airport?.iata,
             arrivalTerminal: resolvedTerminal,
             hasLiveData: hasLiveData
@@ -268,7 +283,7 @@ struct FlightService {
 
         // AeroAPI returns ~2 weeks of history plus upcoming legs; pick the one
         // whose scheduled departure is closest to now (same rule as AeroDataBox).
-        let iso = ISO8601DateFormatter()
+        let iso = Self.isoFormatter
         let now = Date()
         let best = flights.min { a, b in
             let da = a.scheduledOut.flatMap { iso.date(from: $0) }.map { abs($0.timeIntervalSince(now)) } ?? .infinity
@@ -320,15 +335,16 @@ struct FlightService {
 
     // MARK: OpenSky — fetch real-time position (best-effort, never throws)
 
+    // OpenSky has no server-side callsign filter — the full state vector is
+    // returned and we match the callsign locally (padded to 8 chars in feed).
     func fetchPosition(callSign: String) async -> FlightPosition? {
-        let trimmed = callSign.trimmingCharacters(in: .whitespaces).uppercased()
-        guard !trimmed.isEmpty,
-              let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://opensky-network.org/api/states/all?callsign=\(encoded)")
+        let target = callSign.replacingOccurrences(of: " ", with: "").uppercased()
+        guard !target.isEmpty,
+              let url = URL(string: "https://opensky-network.org/api/states/all")
         else { return nil }
 
         var request = URLRequest(url: url)
-        request.timeoutInterval = 10
+        request.timeoutInterval = 15
 
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse,
@@ -336,8 +352,13 @@ struct FlightService {
         else { return nil }
 
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let states = json["states"] as? [[Any?]],
-              let state = states.first,
+              let states = json["states"] as? [[Any?]]
+        else { return nil }
+
+        guard let state = states.first(where: {
+            ($0.count > 1 ? $0[1] as? String : nil)?
+                .trimmingCharacters(in: .whitespaces).uppercased() == target
+        }),
               state.count > 10,
               let lon = state[5] as? Double,
               let lat = state[6] as? Double
@@ -347,9 +368,20 @@ struct FlightService {
             latitude:  lat,
             longitude: lon,
             heading:   state[10] as? Double ?? 0,
-            altitude:  state[13] as? Double,
-            onGround:  state[8]  as? Bool   ?? false
+            altitude:  state.count > 13 ? state[13] as? Double : nil,
+            onGround:  state[8] as? Bool ?? false
         )
+    }
+
+    // Build an OpenSky-style ICAO callsign ("UAL2301") when AeroDataBox omits one.
+    private func deriveCallSign(flightNumber: String, airlineICAO: String?) -> String? {
+        let compact = flightNumber.replacingOccurrences(of: " ", with: "")
+        let digits = compact.drop(while: { $0.isLetter })
+        let prefix = compact.prefix(while: { $0.isLetter })
+        guard !digits.isEmpty else { return nil }
+        if prefix.count == 3 { return String(prefix) + digits }          // already ICAO
+        if let icao = airlineICAO, !icao.isEmpty { return icao + digits } // map IATA → ICAO
+        return nil
     }
 
     // MARK: Private helpers

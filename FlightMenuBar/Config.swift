@@ -16,9 +16,12 @@ enum Config {
     static let aeroAPIBaseURL = "https://aeroapi.flightaware.com/aeroapi"
 
     // Timers
-    static let displayTimerInterval:  TimeInterval = 1.0
+    // Menu bar label shows minute resolution — the popover's seconds countdown
+    // is driven by TimelineView, so 30 s here avoids re-rendering the whole UI every second.
+    static let displayTimerInterval:  TimeInterval = 30.0
     static let pollingTimerInterval:  TimeInterval = 1200.0  // 20 min
-    static let positionTimerInterval: TimeInterval = 30.0    // 30 s
+    // Anonymous OpenSky allows ~100 requests/day; 120 s keeps a full flight within budget
+    static let positionTimerInterval: TimeInterval = 120.0
 
     // UserDefaults keys
     static let lastFlightNumberKey = "lastFlightNumber"

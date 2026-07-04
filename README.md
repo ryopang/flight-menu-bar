@@ -178,6 +178,13 @@ In the app's Tesla setup wizard:
 
 ## Changelog
 
+### v1.4.0 — 2026-07-04
+- **Fix: live position showed the wrong aircraft.** OpenSky has no server-side callsign filter — the app was reading the first of ~11,000 returned aircraft. Now matches the callsign client-side, and derives the ICAO callsign (e.g. `UAL2301`) from airline data when AeroDataBox omits one.
+- **Fix: repeated "arriving soon" notifications.** Polling in the final hour re-fired the arrival notification and Bark push every 20 minutes; now deduplicated, re-firing only if the arrival time actually changes.
+- **Perf:** seconds countdown moved to `TimelineView` so the popover (including the map) no longer re-renders every second; date formatters cached; great-circle route computed once per route instead of per frame.
+- **Privacy:** home address moved out of source into the gitignored secrets file (`Secrets.homeAddress`).
+- OpenSky polling reduced to 2 min (anonymous rate limit is ~100 requests/day); failed flight refreshes now actually retry after 5 min.
+
 ### v1.3.0 — 2026-07-04
 - **Flight map always visible** — the map now shows the route as soon as a flight is tracked, even before departure. Fixes cases where AeroDataBox omits airport coordinates by falling back to a built-in IATA dictionary (35 major US airports) then CLGeocoder.
 - **Tesla battery %** — charging level appears next to "Tesla ready" in the footer (green/orange/red color coding). Fetched on connect and refreshed every 5 minutes while tracking.
