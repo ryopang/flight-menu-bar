@@ -11,6 +11,10 @@ enum Config {
     static let rapidAPIHost     = "aerodatabox.p.rapidapi.com"
     static let flightAPIBaseURL = "https://aerodatabox.p.rapidapi.com/flights/number"
 
+    // FlightAware AeroAPI — optional live delay/status overlay (see README)
+    static let aeroAPIKey     = Secrets.aeroAPIKey
+    static let aeroAPIBaseURL = "https://aeroapi.flightaware.com/aeroapi"
+
     // Timers
     static let displayTimerInterval:  TimeInterval = 1.0
     static let pollingTimerInterval:  TimeInterval = 1200.0  // 20 min

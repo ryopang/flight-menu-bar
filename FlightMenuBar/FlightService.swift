@@ -85,6 +85,40 @@ private struct FlightTime: Codable {
     let local: String?
 }
 
+// MARK: - AeroAPI response models (private)
+
+private struct AeroAPIResponse: Codable {
+    let flights: [AeroAPIFlight]?
+}
+
+private struct AeroAPIFlight: Codable {
+    let status: String?
+    let cancelled: Bool?
+    let diverted: Bool?
+    let scheduledOut: String?
+    let scheduledIn: String?
+    let estimatedIn: String?
+    let actualIn: String?
+    let terminalDestination: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status, cancelled, diverted
+        case scheduledOut = "scheduled_out"
+        case scheduledIn  = "scheduled_in"
+        case estimatedIn  = "estimated_in"
+        case actualIn     = "actual_in"
+        case terminalDestination = "terminal_destination"
+    }
+}
+
+// Live overlay applied on top of the AeroDataBox result
+private struct AeroAPILive {
+    let arrivalDate: Date
+    let scheduledArrival: Date?
+    let status: String
+    let terminal: String?
+}
+
 // MARK: - FlightService
 
 struct FlightService {
@@ -161,21 +195,89 @@ struct FlightService {
         let hasLiveTime = [best.arrival?.actualTime, best.arrival?.runwayTime,
                            best.arrival?.revisedTime, best.arrival?.predictedTime]
             .contains { $0?.utc != nil }
-        let hasLiveData = hasLiveTime || liveStatuses.contains((best.status ?? "").lowercased())
+        var hasLiveData = hasLiveTime || liveStatuses.contains((best.status ?? "").lowercased())
+
+        // AeroDataBox often has schedule-only records; AeroAPI (when configured)
+        // supplies the live estimated arrival and real status on top of it.
+        var resolvedArrival   = arrivalDate
+        var resolvedScheduled = scheduledArrival
+        var resolvedStatus    = best.status ?? "Unknown"
+        var resolvedTerminal  = best.arrival?.terminal
+        if let live = await fetchAeroAPILive(flightNumber: normalized) {
+            resolvedArrival   = live.arrivalDate
+            resolvedScheduled = live.scheduledArrival ?? resolvedScheduled
+            resolvedStatus    = live.status
+            resolvedTerminal  = live.terminal ?? resolvedTerminal
+            hasLiveData       = true
+        }
 
         return FlightResult(
-            arrivalDate: arrivalDate,
-            scheduledArrival: scheduledArrival,
+            arrivalDate: resolvedArrival,
+            scheduledArrival: resolvedScheduled,
             arrivalAirportName: arrivalName,
             departureAirportName: departureName,
-            flightStatus: best.status ?? "Unknown",
+            flightStatus: resolvedStatus,
             departureCoordinate: deptCoord,
             arrivalCoordinate: arrCoord,
             callSign: best.callSign,
             arrivalIATACode: best.arrival?.airport?.iata,
-            arrivalTerminal: best.arrival?.terminal,
+            arrivalTerminal: resolvedTerminal,
             hasLiveData: hasLiveData
         )
+    }
+
+    // MARK: AeroAPI — live delay/status overlay (best-effort, never throws)
+
+    private func fetchAeroAPILive(flightNumber: String) async -> AeroAPILive? {
+        guard !Config.aeroAPIKey.isEmpty,
+              let encoded = flightNumber.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "\(Config.aeroAPIBaseURL)/flights/\(encoded)")
+        else { return nil }
+
+        var request = URLRequest(url: url)
+        request.addValue(Config.aeroAPIKey, forHTTPHeaderField: "x-apikey")
+        request.timeoutInterval = 15
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let decoded = try? JSONDecoder().decode(AeroAPIResponse.self, from: data),
+              let flights = decoded.flights, !flights.isEmpty
+        else { return nil }
+
+        // AeroAPI returns ~2 weeks of history plus upcoming legs; pick the one
+        // whose scheduled departure is closest to now (same rule as AeroDataBox).
+        let iso = ISO8601DateFormatter()
+        let now = Date()
+        let best = flights.min { a, b in
+            let da = a.scheduledOut.flatMap { iso.date(from: $0) }.map { abs($0.timeIntervalSince(now)) } ?? .infinity
+            let db = b.scheduledOut.flatMap { iso.date(from: $0) }.map { abs($0.timeIntervalSince(now)) } ?? .infinity
+            return da < db
+        }
+        guard let flight = best,
+              let arrival = [flight.actualIn, flight.estimatedIn, flight.scheduledIn]
+                  .compactMap({ $0.flatMap { iso.date(from: $0) } }).first
+        else { return nil }
+
+        return AeroAPILive(
+            arrivalDate: arrival,
+            scheduledArrival: flight.scheduledIn.flatMap { iso.date(from: $0) },
+            status: normalizeAeroAPIStatus(flight),
+            terminal: flight.terminalDestination
+        )
+    }
+
+    // Map AeroAPI statuses ("En Route / Delayed", "Arrived / Gate Arrival", …)
+    // onto the vocabulary the UI already understands.
+    private func normalizeAeroAPIStatus(_ flight: AeroAPIFlight) -> String {
+        if flight.cancelled == true { return "Cancelled" }
+        if flight.diverted  == true { return "Diverted" }
+        let s = (flight.status ?? "").lowercased()
+        if s.contains("arrived") || s.contains("landed") { return "Landed" }
+        if s.contains("delayed")   { return "Delayed" }
+        if s.contains("en route")  { return "En Route" }
+        if s.contains("taxiing") || s.contains("departed") { return "Departed" }
+        if s.contains("scheduled") { return "Scheduled" }
+        return flight.status ?? "Unknown"
     }
 
     // MARK: OpenSky — fetch real-time position (best-effort, never throws)
