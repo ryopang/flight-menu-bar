@@ -155,7 +155,7 @@ In the app's Tesla setup wizard:
 |---|---|
 | `FlightMenuBarApp.swift` | App entry point, `NSApplicationDelegate` for URL scheme callbacks |
 | `AppState.swift` | Central `ObservableObject`; polling timers, leave-by task scheduling |
-| `FlightService.swift` | AeroDataBox flight lookup + OpenSky real-time position |
+| `FlightService.swift` | AeroDataBox flight lookup + FlightAware AeroAPI live overlay + OpenSky real-time position |
 | `DrivingService.swift` | MapKit driving time calculation |
 | `TeslaService.swift` | Tesla OAuth, virtual key setup, partner registration, navigation |
 | `TeslaCommandSigner.swift` | ECDH + HKDF + AES-GCM signed command protocol |
@@ -173,6 +173,23 @@ In the app's Tesla setup wizard:
 - No data is sent to any server other than AeroDataBox, OpenSky, Tesla Fleet API, and your own Bark server
 - All credentials are stored in `UserDefaults` (access tokens) or the macOS Keychain (private key)
 - The app has no analytics, no crash reporting, and no third-party SDKs
+
+---
+
+## Changelog
+
+### v1.2.0 — 2026-07-04
+- **FlightAware AeroAPI integration** — live estimated arrival, real delay minutes, and accurate status (Delayed, En Route, Landed) overlay on top of AeroDataBox. Falls back gracefully when no key is configured.
+- Fix: no longer shows a false "On time" badge when the API only has schedule-only data; shows "Scheduled time — no live updates yet" instead.
+
+### v1.1.0 — 2026-07-01
+- Aircraft heading now computed from departure airport → current GPS position (great-circle bearing), replacing the unreliable OpenSky `true_track` field which is frequently null.
+- Tesla partner account registration (`POST /api/1/partner_accounts`) wired in before opening the `_ak` virtual key link — fixes "Unable to Grant Third-Party Access" error on first Tesla setup.
+- Manual Tesla navigation button added next to the leave-by time.
+- Bark leave-by notification fires at leave-by time (−15 min buffer before arrival).
+
+### v1.0.0 — 2026-06-15
+- Initial release: flight tracking, live map, driving time, leave-by alarm, Tesla navigation, Bark push, Launch at Login.
 
 ---
 
