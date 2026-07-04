@@ -78,10 +78,14 @@ struct MenuBarView: View {
                             Text("+\(delay) min")
                                 .font(.caption)
                                 .foregroundStyle(delay >= 60 ? .red : .orange)
-                        } else {
+                        } else if appState.hasLiveData {
                             Text("On time")
                                 .font(.caption)
                                 .foregroundStyle(.green)
+                        } else {
+                            Text("Scheduled time — no live updates yet")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     if let minutes = appState.drivingMinutes, let arrival = appState.arrivalDate {

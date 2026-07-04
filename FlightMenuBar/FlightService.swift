@@ -14,6 +14,9 @@ struct FlightResult {
     let callSign: String?
     let arrivalIATACode: String?
     let arrivalTerminal: String?
+    // False when the API only has the published schedule (no revised/actual
+    // times and no live status) — the arrival time can't confirm "on time".
+    let hasLiveData: Bool
 }
 
 struct FlightPosition {
@@ -152,6 +155,14 @@ struct FlightService {
 
         let scheduledArrival: Date? = best.arrival?.scheduledTime?.utc.flatMap { parseDate($0) }
 
+        let liveStatuses: Set<String> = ["enroute", "en route", "departed", "boarding",
+                                         "gateclosed", "delayed", "approaching",
+                                         "landed", "arrived", "canceled", "cancelled", "diverted"]
+        let hasLiveTime = [best.arrival?.actualTime, best.arrival?.runwayTime,
+                           best.arrival?.revisedTime, best.arrival?.predictedTime]
+            .contains { $0?.utc != nil }
+        let hasLiveData = hasLiveTime || liveStatuses.contains((best.status ?? "").lowercased())
+
         return FlightResult(
             arrivalDate: arrivalDate,
             scheduledArrival: scheduledArrival,
@@ -162,7 +173,8 @@ struct FlightService {
             arrivalCoordinate: arrCoord,
             callSign: best.callSign,
             arrivalIATACode: best.arrival?.airport?.iata,
-            arrivalTerminal: best.arrival?.terminal
+            arrivalTerminal: best.arrival?.terminal,
+            hasLiveData: hasLiveData
         )
     }
 

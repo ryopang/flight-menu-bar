@@ -25,6 +25,8 @@ class AppState: ObservableObject {
     // Delay: positive = late, negative = early, nil = unknown or within ±5 min threshold
     @Published var delayMinutes: Int?
     @Published var scheduledArrivalDate: Date?
+    // False when the API only has published-schedule data for this flight
+    @Published var hasLiveData: Bool = false
 
     // Driving: nil until first MKDirections result
     @Published var drivingMinutes: Int?
@@ -96,6 +98,7 @@ class AppState: ObservableObject {
             arrivalTerminal      = result.arrivalTerminal
             scheduledArrivalDate = result.scheduledArrival
             delayMinutes         = computeDelay(scheduled: result.scheduledArrival, resolved: result.arrivalDate)
+            hasLiveData          = result.hasLiveData
             isTracking           = true
             statusMessage        = "Status: \(friendlyStatus(result.flightStatus))"
 
@@ -130,6 +133,7 @@ class AppState: ObservableObject {
         arrivalTerminal      = nil
         scheduledArrivalDate = nil
         delayMinutes         = nil
+        hasLiveData          = false
         drivingMinutes       = nil
         statusMessage        = "Enter a flight number to start tracking"
         NotificationManager.shared.cancelLeaveByNotification()
@@ -150,6 +154,7 @@ class AppState: ObservableObject {
             arrivalTerminal      = result.arrivalTerminal
             scheduledArrivalDate = result.scheduledArrival
             delayMinutes         = computeDelay(scheduled: result.scheduledArrival, resolved: result.arrivalDate)
+            hasLiveData          = result.hasLiveData
             statusMessage        = "Status: \(friendlyStatus(result.flightStatus))"
             NotificationManager.shared.scheduleArrivalNotification(
                 flightNumber: flightNumber,
