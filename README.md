@@ -178,6 +178,10 @@ In the app's Tesla setup wizard:
 
 ## Changelog
 
+### v1.3.0 — 2026-07-04
+- **Flight map always visible** — the map now shows the route as soon as a flight is tracked, even before departure. Fixes cases where AeroDataBox omits airport coordinates by falling back to a built-in IATA dictionary (35 major US airports) then CLGeocoder.
+- **Tesla battery %** — charging level appears next to "Tesla ready" in the footer (green/orange/red color coding). Fetched on connect and refreshed every 5 minutes while tracking.
+
 ### v1.2.0 — 2026-07-04
 - **FlightAware AeroAPI integration** — live estimated arrival, real delay minutes, and accurate status (Delayed, En Route, Landed) overlay on top of AeroDataBox. Falls back gracefully when no key is configured.
 - Fix: no longer shows a false "On time" badge when the API only has schedule-only data; shows "Scheduled time — no live updates yet" instead.
