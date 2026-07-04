@@ -28,6 +28,7 @@ A macOS menu bar app that tracks a live flight and automatically sends GPS navig
 | macOS | 13 Ventura or later |
 | Xcode | 15 or later (to build from source) |
 | [AeroDataBox API key](https://rapidapi.com/aedbx-aerodatabox) | Free tier covers personal use |
+| [AeroAPI key](https://www.flightaware.com/aeroapi/portal/) (optional) | Adds live delay data — Personal tier includes $5/month free usage |
 | [Bark iOS app](https://apps.apple.com/app/bark-customed-notifications/id1403753865) | For iPhone push notifications |
 | Tesla account + Fleet API app | Register at [developer.tesla.com](https://developer.tesla.com) |
 | A domain to host your Tesla public key | e.g. a free Vercel project |
@@ -54,6 +55,7 @@ Open `Config.secret.swift` and fill in your values:
 ```swift
 enum Secrets {
     static let rapidAPIKey        = "YOUR_RAPIDAPI_KEY"
+    static let aeroAPIKey         = ""   // optional — FlightAware AeroAPI for live delays
     static let barkDeviceToken    = "YOUR_BARK_DEVICE_TOKEN"
     static let teslaClientID      = "YOUR_TESLA_CLIENT_ID"
     static let teslaClientSecret  = "YOUR_TESLA_CLIENT_SECRET"
@@ -82,6 +84,17 @@ xcodebuild -project FlightMenuBar.xcodeproj -scheme FlightMenuBar -configuration
 1. Sign up at [RapidAPI](https://rapidapi.com/aedbx-aerodatabox)
 2. Subscribe to **AeroDataBox** — the free tier is sufficient for personal use
 3. Copy your API key into `Secrets.rapidAPIKey`
+
+### FlightAware AeroAPI (optional — live delay data)
+
+AeroDataBox sometimes has schedule-only records with no live status. With an
+AeroAPI key configured, the app overlays FlightAware's live estimated arrival,
+delay, and status on every lookup.
+
+1. Sign up at the [AeroAPI portal](https://www.flightaware.com/aeroapi/portal/)
+2. Choose the **Personal** tier — includes $5/month of free usage (a lookup
+   costs $0.005, so personal polling stays well under the cap)
+3. Copy the key into `Secrets.aeroAPIKey` (leave `""` to disable)
 
 ### Bark (iPhone push notifications)
 
