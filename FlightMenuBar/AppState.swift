@@ -38,6 +38,7 @@ class AppState: ObservableObject {
     private var displayTimer:  Timer?
     private var pollingTimer:  Timer?
     private var positionTimer: Timer?
+    private var batteryTimer:  Timer?
     private var leaveByTask:   Task<Void, Never>?
 
     init() {
@@ -240,12 +241,20 @@ class AppState: ObservableObject {
         }
         RunLoop.main.add(pos, forMode: .common)
         positionTimer = pos
+
+        // Refresh Tesla battery every 5 minutes while tracking
+        let bat = Timer(timeInterval: 300, repeats: true) { _ in
+            Task { await TeslaService.shared.refreshBatteryLevel() }
+        }
+        RunLoop.main.add(bat, forMode: .common)
+        batteryTimer = bat
     }
 
     private func stopTimers() {
         displayTimer?.invalidate();  displayTimer  = nil
         pollingTimer?.invalidate();  pollingTimer  = nil
         positionTimer?.invalidate(); positionTimer = nil
+        batteryTimer?.invalidate();  batteryTimer  = nil
     }
 
     // MARK: - Helpers

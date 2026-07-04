@@ -233,6 +233,11 @@ struct MenuBarView: View {
                 ProgressView().controlSize(.mini)
             } else if teslaService.isConnected && teslaService.hasVirtualKey {
                 Text("Tesla ready").font(.caption).foregroundStyle(.secondary)
+                if let pct = teslaService.batteryLevel {
+                    Text("\(pct)%")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(pct < 20 ? .red : pct < 40 ? .orange : .secondary)
+                }
                 Spacer()
                 Button("Disconnect") { teslaService.disconnect() }
                     .buttonStyle(.plain).font(.caption).foregroundStyle(.red.opacity(0.8))

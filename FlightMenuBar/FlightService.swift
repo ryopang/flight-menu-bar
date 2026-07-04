@@ -119,6 +119,24 @@ private struct AeroAPILive {
     let terminal: String?
 }
 
+// MARK: - Airport coordinate fallback
+
+private let knownAirportCoordinates: [String: (Double, Double)] = [
+    "ATL": (33.6407, -84.4277), "AUS": (30.1975, -97.6664), "BNA": (36.1245, -86.6782),
+    "BOS": (42.3656, -71.0096), "BWI": (39.1754, -76.6682), "CLT": (35.2140, -80.9431),
+    "DAL": (32.8481, -96.8517), "DCA": (38.8512, -77.0402), "DEN": (39.8561, -104.6737),
+    "DFW": (32.8998, -97.0403), "DTW": (42.2162, -83.3554), "EWR": (40.6925, -74.1687),
+    "FLL": (26.0726, -80.1527), "HNL": (21.3245, -157.9251), "HOU": (29.6454, -95.2789),
+    "IAD": (38.9531, -77.4565), "IAH": (29.9902, -95.3368), "JFK": (40.6413, -73.7781),
+    "LAS": (36.0840, -115.1537), "LAX": (33.9425, -118.4081), "LGA": (40.7773, -73.8726),
+    "MCO": (28.4312, -81.3081), "MDW": (41.7868, -87.7522), "MIA": (25.7959, -80.2870),
+    "MSP": (44.8848, -93.2223), "MSY": (29.9934, -90.2580), "OAK": (37.7213, -122.2208),
+    "ORD": (41.9742, -87.9073), "PDX": (45.5898, -122.5951), "PHL": (39.8744, -75.2424),
+    "PHX": (33.4373, -112.0078), "RDU": (35.8801, -78.7880), "SAN": (32.7338, -117.1933),
+    "SEA": (47.4502, -122.3088), "SFO": (37.6213, -122.3790), "SJC": (37.3626, -121.9290),
+    "SLC": (40.7899, -111.9791), "STL": (38.7487, -90.3700), "TPA": (27.9755, -82.5332),
+]
+
 // MARK: - FlightService
 
 struct FlightService {
@@ -180,12 +198,16 @@ struct FlightService {
             ?? best.departure?.airport?.iata
             ?? "Unknown"
 
-        let deptCoord = best.departure?.airport?.location.map {
-            CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
-        }
-        let arrCoord = best.arrival?.airport?.location.map {
-            CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon)
-        }
+        let deptCoord = await resolveCoordinate(
+            location: best.departure?.airport?.location,
+            iata: best.departure?.airport?.iata,
+            name: best.departure?.airport?.name
+        )
+        let arrCoord = await resolveCoordinate(
+            location: best.arrival?.airport?.location,
+            iata: best.arrival?.airport?.iata,
+            name: best.arrival?.airport?.name
+        )
 
         let scheduledArrival: Date? = best.arrival?.scheduledTime?.utc.flatMap { parseDate($0) }
 
@@ -264,6 +286,22 @@ struct FlightService {
             status: normalizeAeroAPIStatus(flight),
             terminal: flight.terminalDestination
         )
+    }
+
+    // Resolve airport coordinate: AeroDataBox location → known IATA dict → geocode by name
+    private func resolveCoordinate(location: AirportLocation?, iata: String?, name: String?) async -> CLLocationCoordinate2D? {
+        if let loc = location {
+            return CLLocationCoordinate2D(latitude: loc.lat, longitude: loc.lon)
+        }
+        if let iata, let known = knownAirportCoordinates[iata.uppercased()] {
+            return CLLocationCoordinate2D(latitude: known.0, longitude: known.1)
+        }
+        guard let query = iata.map({ "\($0) Airport" }) ?? name.map({ "\($0) Airport" }) else { return nil }
+        return await withCheckedContinuation { cont in
+            CLGeocoder().geocodeAddressString(query) { placemarks, _ in
+                cont.resume(returning: placemarks?.first?.location?.coordinate)
+            }
+        }
     }
 
     // Map AeroAPI statuses ("En Route / Delayed", "Arrived / Gate Arrival", …)

@@ -17,6 +17,7 @@ class TeslaService: ObservableObject {
     @Published var isRegisteringPartner: Bool = false
     @Published var lastError: String?        = nil
     @Published var publicKeyPEM: String?     = nil
+    @Published var batteryLevel: Int?        = nil
 
     // MARK: - Lifecycle
 
@@ -25,6 +26,24 @@ class TeslaService: ObservableObject {
         hasVirtualKey        = UserDefaults.standard.bool(forKey: Config.teslaVirtualKeyAddedKey)
         isPartnerRegistered  = UserDefaults.standard.bool(forKey: Config.teslaPartnerRegisteredKey)
         publicKeyPEM         = KeyManager.loadPrivateKey().map { KeyManager.publicKeyPEM(from: $0.publicKey) }
+        if isConnected { Task { await refreshBatteryLevel() } }
+    }
+
+    func refreshBatteryLevel() async {
+        guard isConnected,
+              let token = await validAccessToken(),
+              let vin = UserDefaults.standard.string(forKey: Config.teslaVehicleVINKey), !vin.isEmpty
+        else { return }
+        var req = URLRequest(url: URL(string: "\(Config.teslaFleetBaseURL)/api/1/vehicles/\(vin)/vehicle_data?endpoints=charge_state")!)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let response = json["response"] as? [String: Any],
+              let chargeState = response["charge_state"] as? [String: Any],
+              let level = chargeState["battery_level"] as? Int
+        else { return }
+        batteryLevel = level
     }
 
     func disconnect() {
@@ -108,6 +127,7 @@ class TeslaService: ObservableObject {
         if await exchangeCode(code) {
             await fetchAndCacheVehicleInfo()
             isConnected = true
+            await refreshBatteryLevel()
         } else {
             lastError = "Token exchange failed — please try again"
         }
