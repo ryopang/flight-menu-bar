@@ -11,11 +11,16 @@ A macOS menu bar app that tracks a live flight and automatically sends GPS navig
 ## Features
 
 - **Live flight tracking** — enter any flight number and get real-time status, arrival countdown, delay info, and en-route / landed status via AeroDataBox
-- **Live aircraft position** — shows the plane on a great-circle map with a heading-accurate icon, refreshed every 30 seconds via OpenSky Network
-- **Driving time & leave-by reminder** — calculates drive time from your current location to the arrival airport using MapKit, and displays a "Leave by" time
-- **Bark push notification** — fires a push notification to your iPhone at exactly the leave-by moment (15 min before you need to leave)
-- **Tesla navigation** — sends GPS coordinates of the arrival terminal directly to your Tesla at leave-by time via the Fleet API signed-command protocol; or trigger it manually with one click
+- **Live aircraft position** — shows the plane on a great-circle map with a heading-accurate icon, refreshed every 2 minutes via OpenSky Network
+- **Driving time & leave-by reminder** — calculates drive time from your home address to the arrival airport using MapKit, and displays a "Leave by" time
+- **Configurable home address** — set or update your home address any time via the ⚙ Settings panel without rebuilding the app
+- **Configurable notification lead time** — choose how many minutes before leave time to be notified (0 – 30 min, default 15) via the ⚙ Settings panel
+- **macOS banner notifications** — arrival alert 1 hour out and a leave-by alert fire as macOS notification banners, visible whether the popover is open or not
+- **Bark push notification** — fires a push to your iPhone at exactly the right moment (T-1h for arrival, leave-by lead time for departure)
+- **Tesla navigation** — sends GPS coordinates of the arrival terminal directly to your Tesla at leave-by time via the Fleet API signed-command protocol
+- **Manual Tesla nav button** — tap the ⚡ bolt icon next to the leave-by time to send navigation immediately, without waiting for the auto-trigger
 - **Tesla setup wizard** — in-app OAuth login, virtual key generation and hosting, partner registration, and key-add flow
+- **Auto-stop after landing** — tracking automatically stops 15 minutes after the flight lands; no manual cleanup needed
 - **Menu bar countdown** — shows `✈ 2h 14m` in the menu bar with colour coding (green = on time, orange = delayed, red = >1h late)
 - **Launch at Login** — one checkbox to enable, powered by `SMAppService`
 
@@ -54,12 +59,13 @@ Open `Config.secret.swift` and fill in your values:
 
 ```swift
 enum Secrets {
-    static let rapidAPIKey        = "YOUR_RAPIDAPI_KEY"
-    static let aeroAPIKey         = ""   // optional — FlightAware AeroAPI for live delays
-    static let barkDeviceToken    = "YOUR_BARK_DEVICE_TOKEN"
-    static let teslaClientID      = "YOUR_TESLA_CLIENT_ID"
-    static let teslaClientSecret  = "YOUR_TESLA_CLIENT_SECRET"
+    static let rapidAPIKey          = "YOUR_RAPIDAPI_KEY"
+    static let aeroAPIKey           = ""   // optional — FlightAware AeroAPI for live delays
+    static let barkDeviceToken      = "YOUR_BARK_DEVICE_TOKEN"
+    static let teslaClientID        = "YOUR_TESLA_CLIENT_ID"
+    static let teslaClientSecret    = "YOUR_TESLA_CLIENT_SECRET"
     static let teslaKeyServerDomain = "yourdomain.vercel.app"
+    static let homeAddress          = "YOUR_HOME_ADDRESS"  // default; overridable in-app
 }
 ```
 
@@ -69,11 +75,9 @@ enum Secrets {
 
 Open `FlightMenuBar.xcodeproj` in Xcode, select the **FlightMenuBar** scheme, and press **⌘R**.
 
-Or build from the command line:
+### 4. Grant notifications
 
-```bash
-xcodebuild -project FlightMenuBar.xcodeproj -scheme FlightMenuBar -configuration Release build
-```
+On first launch, click the ✈ menu bar icon to open the popover — the system notification permission dialog will appear. Click **Allow**, then go to **System Settings → Notifications → FlightMenuBar** and set the alert style to **Alerts** so banners appear on screen.
 
 ---
 
@@ -130,7 +134,7 @@ In the app's Tesla setup wizard:
 
 #### Step 3 — Add the virtual key to your car
 
-1. Click **Open tesla.com/_ak link** in the setup wizard — the app first registers with Tesla's Fleet API backend, then opens the key-add page
+1. Click **Open tesla.com/_ak link** in the setup wizard — the app registers with Tesla's Fleet API backend, then opens the key-add page
 2. Scan the QR code with the Tesla mobile app and tap **Add**
 3. Back in the wizard, click **I've added the key ✓**
 
@@ -141,11 +145,19 @@ In the app's Tesla setup wizard:
 1. Click the `✈` icon in the menu bar
 2. Type a flight number (e.g. `UA1597`) and press **Track**
 3. The app polls every 20 minutes for updates and recalculates driving time
-4. At leave-by time (drive time + 15-minute buffer before arrival), you'll receive:
-   - A macOS notification
+4. At leave-by time you'll receive:
+   - A macOS notification banner
    - A Bark push to your iPhone
    - Automatic GPS navigation sent to your Tesla
-5. You can also tap the **⚡ bolt icon** next to the leave-by time to send Tesla navigation immediately
+5. Tap the **⚡ bolt icon** next to the leave-by time to send Tesla navigation immediately
+6. When the flight lands, tracking stops automatically after 15 minutes
+
+### Settings (⚙ gear icon in the footer)
+
+| Setting | Description |
+|---|---|
+| **Home Address** | The address used for driving time calculations. Enter a new address and tap Save — takes effect immediately. |
+| **Leave-by Notification** | How many minutes before your leave-by time to notify you (0 – 30 min, 5-min steps). Default: 15 min. |
 
 ---
 
@@ -154,17 +166,18 @@ In the app's Tesla setup wizard:
 | File | Responsibility |
 |---|---|
 | `FlightMenuBarApp.swift` | App entry point, `NSApplicationDelegate` for URL scheme callbacks |
-| `AppState.swift` | Central `ObservableObject`; polling timers, leave-by task scheduling |
+| `AppState.swift` | Central `ObservableObject`; polling timers, `leaveByTask`, `arrivalBarkTask`, `landedAutoStopTask` |
 | `FlightService.swift` | AeroDataBox flight lookup + FlightAware AeroAPI live overlay + OpenSky real-time position |
-| `DrivingService.swift` | MapKit driving time calculation |
+| `DrivingService.swift` | MapKit driving time; reads home address from `UserDefaults` with `Secrets` fallback |
+| `NotificationManager.swift` | macOS `UNUserNotificationCenter` notifications + `UNUserNotificationCenterDelegate` for foreground display |
 | `TeslaService.swift` | Tesla OAuth, virtual key setup, partner registration, navigation |
 | `TeslaCommandSigner.swift` | ECDH + HKDF + AES-GCM signed command protocol |
 | `TeslaProto.swift` | Minimal protobuf encoder/decoder for Tesla's command wire format |
-| `NotificationManager.swift` | macOS `UNUserNotificationCenter` leave-by notification |
 | `BarkService.swift` | Bark HTTP push to iPhone |
 | `KeyManager.swift` | P-256 key generation and Keychain storage |
-| `FlightMapView.swift` | `MapKit` great-circle route with live aircraft position |
-| `MenuBarView.swift` | Main SwiftUI popover UI |
+| `FlightMapView.swift` | MapKit great-circle route with live aircraft position |
+| `MenuBarView.swift` | Main SwiftUI popover UI, settings panel, Tesla setup wizard |
+| `Config.swift` | API keys, UserDefaults keys, computed helpers for `homeAddress` and `leaveByLeadMinutes` |
 
 ---
 
@@ -177,6 +190,15 @@ In the app's Tesla setup wizard:
 ---
 
 ## Changelog
+
+### v1.5.0 — 2026-07-06
+
+- **Configurable home address** — set your home address in the new ⚙ Settings panel (footer gear icon) without editing code. Clears the geocode cache and re-fetches driving time immediately.
+- **Configurable notification lead time** — choose 0 – 30 min (5-min steps) for how early to be notified before leave-by time. Default 15 min. Updates the pending Mac notification live when changed.
+- **Fix: notifications not showing** — `UNUserNotificationCenterDelegate` was not set, causing macOS to silently suppress banners while the app was running (an LSUIElement menu bar app is always "running"). Added delegate with `willPresent` returning `.banner + .sound`. Also added a first-launch authorization check with a note to set alert style to **Alerts** in System Settings.
+- **Fix: Bark push firing on every 20-minute poll** — the T-1h Bark push was sent immediately each time the flight was refreshed, not at T-1h. Moved it to `AppState.arrivalBarkTask`, a one-shot `Task` that fires exactly once at T-1h and self-cancels.
+- **Auto-stop after landing** — when flight status becomes "Landed" or "Arrived", a `landedAutoStopTask` stops tracking automatically 15 minutes later. Status message updates to "Landed — auto-stopping tracking in 15 min".
+- **New app icon** — deep navy → rich blue gradient squircle with a white commercial jet silhouette at landing-approach angle.
 
 ### v1.4.0 — 2026-07-04
 - **Fix: live position showed the wrong aircraft.** OpenSky has no server-side callsign filter — the app was reading the first of ~11,000 returned aircraft. Now matches the callsign client-side, and derives the ICAO callsign (e.g. `UAL2301`) from airline data when AeroDataBox omits one.
