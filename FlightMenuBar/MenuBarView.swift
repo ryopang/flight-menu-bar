@@ -4,10 +4,14 @@ import ServiceManagement
 struct MenuBarView: View {
     @EnvironmentObject private var appState:     AppState
     @EnvironmentObject private var teslaService: TeslaService
-    @State private var inputFlight:   String = ""
-    @State private var launchAtLogin: Bool   = false
-    @State private var showTeslaSetup: Bool  = false
-    @State private var isSendingNav:  Bool   = false
+    @State private var inputFlight:    String = ""
+    @State private var launchAtLogin:  Bool   = false
+    @State private var showTeslaSetup: Bool   = false
+    @State private var showSettings:   Bool   = false
+    @State private var isSendingNav:   Bool   = false
+    // Settings state
+    @State private var homeAddressInput: String = ""
+    @State private var leadTimeMinutes:  Int    = Config.defaultLeaveByLeadMin
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
@@ -24,9 +28,12 @@ struct MenuBarView: View {
         }
         .frame(width: 300)
         .onAppear {
-            inputFlight = appState.flightNumber
+            inputFlight      = appState.flightNumber
+            launchAtLogin    = SMAppService.mainApp.status == .enabled
+            homeAddressInput = UserDefaults.standard.string(forKey: Config.homeAddressKey) ?? ""
+            let saved = UserDefaults.standard.integer(forKey: Config.leaveByLeadMinutesKey)
+            leadTimeMinutes  = saved > 0 ? saved : Config.defaultLeaveByLeadMin
             NotificationManager.shared.requestAuthorization()
-            launchAtLogin = SMAppService.mainApp.status == .enabled
             teslaService.restoreSession()
         }
     }
@@ -67,8 +74,8 @@ struct MenuBarView: View {
 
             if let arrival = appState.arrivalDate {
                 VStack(alignment: .leading, spacing: 3) {
-                    // TimelineView confines the once-a-second invalidation to this
-                    // text; the rest of the popover (including the map) stays untouched.
+                    // TimelineView confines the once-a-second invalidation to just
+                    // this text; the map and the rest of the popover stay untouched.
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(Self.countdownString(to: arrival, now: context.date))
                             .font(.system(.title2, design: .monospaced).weight(.semibold))
@@ -102,6 +109,7 @@ struct MenuBarView: View {
                             Text("Leave by \(leaveBy.formatted(date: .omitted, time: .shortened))")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            // Manual Tesla nav button
                             if teslaService.isConnected && teslaService.hasVirtualKey {
                                 Button {
                                     isSendingNav = true
@@ -201,11 +209,18 @@ struct MenuBarView: View {
 
     private var footer: some View {
         VStack(spacing: 6) {
+            // Tesla row / setup wizard
             if showTeslaSetup {
                 teslaSetupView
             } else {
                 teslaStatusRow
             }
+
+            // Settings panel
+            if showSettings {
+                settingsView
+            }
+
             Divider()
             HStack {
                 Toggle("Launch at Login", isOn: launchAtLoginBinding)
@@ -213,6 +228,17 @@ struct MenuBarView: View {
                     .foregroundStyle(.secondary)
                     .toggleStyle(.checkbox)
                 Spacer()
+                // Settings gear toggle
+                Button {
+                    showSettings.toggle()
+                    if showSettings { showTeslaSetup = false }
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.caption)
+                        .foregroundStyle(showSettings ? .blue : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Settings")
                 Button("Quit") { NSApplication.shared.terminate(nil) }
                     .buttonStyle(.plain)
                     .font(.caption)
@@ -221,6 +247,65 @@ struct MenuBarView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    // MARK: - Settings panel
+
+    @ViewBuilder
+    private var settingsView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+
+            // Home address
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Home Address")
+                    .font(.caption.bold())
+                HStack(spacing: 6) {
+                    TextField(Config.homeAddress, text: $homeAddressInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
+                    Button("Save") {
+                        saveHomeAddress()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(homeAddressInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                Text("Current: \(Config.homeAddress)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            // Leave-by lead time
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Leave-by Notification")
+                    .font(.caption.bold())
+                Stepper(
+                    "Notify \(leadTimeMinutes) min before leave time",
+                    value: $leadTimeMinutes,
+                    in: 0...30,
+                    step: 5
+                )
+                .font(.caption)
+                .onChange(of: leadTimeMinutes) { _, newVal in
+                    UserDefaults.standard.set(newVal, forKey: Config.leaveByLeadMinutesKey)
+                    // Re-schedule the Mac notification with the new lead
+                    if let arrival = appState.arrivalDate, let drive = appState.drivingMinutes {
+                        NotificationManager.shared.scheduleLeaveByNotification(
+                            airport: appState.arrivalAirport,
+                            terminal: appState.arrivalTerminal,
+                            arrivalDate: arrival,
+                            drivingMinutes: drive
+                        )
+                    }
+                }
+                Text("How early to ping you before you need to leave")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, 2)
     }
 
     // MARK: - Tesla status row (collapsed)
@@ -248,14 +333,14 @@ struct MenuBarView: View {
             } else if teslaService.isConnected && !teslaService.hasVirtualKey {
                 Text("Tesla — virtual key needed").font(.caption).foregroundStyle(.orange)
                 Spacer()
-                Button("Setup") { showTeslaSetup = true }
+                Button("Setup") { showTeslaSetup = true; showSettings = false }
                     .buttonStyle(.plain).font(.caption).foregroundStyle(.blue)
             } else {
                 Text(teslaService.lastError ?? "Tesla not connected")
                     .font(.caption)
                     .foregroundStyle(teslaService.lastError != nil ? .red.opacity(0.8) : .secondary)
                 Spacer()
-                Button("Setup") { showTeslaSetup = true }
+                Button("Setup") { showTeslaSetup = true; showSettings = false }
                     .buttonStyle(.plain).font(.caption).foregroundStyle(.blue)
             }
         }
@@ -263,7 +348,6 @@ struct MenuBarView: View {
 
     private var teslaIcon: String {
         if teslaService.isConnected && teslaService.hasVirtualKey { return "bolt.car.fill" }
-        if teslaService.isConnected { return "bolt.car" }
         return "bolt.car"
     }
     private var teslaIconColor: Color {
@@ -284,7 +368,6 @@ struct MenuBarView: View {
             }
 
             if !teslaService.isConnected {
-                // Step 1: OAuth
                 setupStep(number: "1", title: "Sign in with Tesla") {
                     Button("Open Tesla Login") { teslaService.startAuth() }
                         .buttonStyle(.bordered).controlSize(.small)
@@ -293,7 +376,6 @@ struct MenuBarView: View {
                 Text("✓ Tesla account connected").font(.caption).foregroundStyle(.green)
             }
 
-            // Step 2: Virtual key
             setupStep(number: "2", title: "Host your public key on Vercel") {
                 if let pem = teslaService.publicKeyPEM {
                     Button("Regenerate Key") { _ = teslaService.generateVirtualKey() }
@@ -304,7 +386,6 @@ struct MenuBarView: View {
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
-                    // PEM display with copy button
                     HStack(alignment: .top, spacing: 4) {
                         Text(pem)
                             .font(.system(size: 8, design: .monospaced))
@@ -332,7 +413,6 @@ struct MenuBarView: View {
                 }
             }
 
-            // Step 3: Add key to car
             setupStep(number: "3", title: "Add key to your Tesla") {
                 Button {
                     Task { await teslaService.registerAndOpenKeyURL() }
@@ -384,6 +464,17 @@ struct MenuBarView: View {
     }
 
     // MARK: - Helpers
+
+    private func saveHomeAddress() {
+        let trimmed = homeAddressInput.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        UserDefaults.standard.set(trimmed, forKey: Config.homeAddressKey)
+        DrivingService.clearCache()
+        // Re-fetch driving time with the new address if currently tracking
+        if appState.isTracking {
+            Task { await appState.refreshDriving() }
+        }
+    }
 
     private var launchAtLoginBinding: Binding<Bool> {
         Binding(

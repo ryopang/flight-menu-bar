@@ -31,16 +31,18 @@ class AppState: ObservableObject {
     // Driving: nil until first MKDirections result
     @Published var drivingMinutes: Int?
 
-    // Incremented by display timer to drive countdown re-renders
+    // Incremented by display timer to drive menu bar label re-renders (minute resolution)
     @Published private var tick: Int = 0
 
     private var callSign: String = ""
-    private var displayTimer:  Timer?
-    private var pollingTimer:  Timer?
-    private var positionTimer: Timer?
-    private var batteryTimer:  Timer?
-    private var leaveByTask:   Task<Void, Never>?
-    private var retryTask:     Task<Void, Never>?
+    private var displayTimer:       Timer?
+    private var pollingTimer:       Timer?
+    private var positionTimer:      Timer?
+    private var batteryTimer:       Timer?
+    private var leaveByTask:        Task<Void, Never>?  // Bark + Tesla nav at leave-by time
+    private var arrivalBarkTask:    Task<Void, Never>?  // Bark at T-1h
+    private var landedAutoStopTask: Task<Void, Never>?  // Auto-stop 15 min after landing
+    private var retryTask:          Task<Void, Never>?
 
     init() {
         flightNumber = UserDefaults.standard.string(forKey: Config.lastFlightNumberKey) ?? ""
@@ -98,6 +100,9 @@ class AppState: ObservableObject {
                 airport: result.arrivalAirportName,
                 terminal: result.arrivalTerminal
             )
+            scheduleArrivalBark(flightNumber: normalized, arrivalDate: result.arrivalDate,
+                                airport: result.arrivalAirportName, terminal: result.arrivalTerminal)
+            scheduleAutoStop(flightStatus: result.flightStatus, arrivalDate: result.arrivalDate)
             startTimers()
             // Fetch position and driving time immediately on first open
             Task { await refreshPosition() }
@@ -127,13 +132,13 @@ class AppState: ObservableObject {
         drivingMinutes       = nil
         statusMessage        = "Enter a flight number to start tracking"
         NotificationManager.shared.cancelLeaveByNotification()
-        leaveByTask?.cancel()
-        leaveByTask = nil
-        retryTask?.cancel()
-        retryTask = nil
-        stopTimers()
         NotificationManager.shared.cancelNotification()
         NotificationManager.shared.resetImmediateDedup()
+        leaveByTask?.cancel();        leaveByTask        = nil
+        arrivalBarkTask?.cancel();    arrivalBarkTask    = nil
+        landedAutoStopTask?.cancel(); landedAutoStopTask = nil
+        retryTask?.cancel();          retryTask          = nil
+        stopTimers()
     }
 
     func refreshFlight() async {
@@ -145,18 +150,25 @@ class AppState: ObservableObject {
             arrivalDate          = result.arrivalDate
             arrivalAirport       = result.arrivalAirportName
             flightStatus         = result.flightStatus
-            callSign             = result.callSign ?? callSign  // keep existing if missing
+            callSign             = result.callSign ?? callSign
             arrivalTerminal      = result.arrivalTerminal
             scheduledArrivalDate = result.scheduledArrival
             delayMinutes         = computeDelay(scheduled: result.scheduledArrival, resolved: result.arrivalDate)
             hasLiveData          = result.hasLiveData
             statusMessage        = "Status: \(friendlyStatus(result.flightStatus))"
+
             NotificationManager.shared.scheduleArrivalNotification(
                 flightNumber: flightNumber,
                 arrivalDate: result.arrivalDate,
                 airport: result.arrivalAirportName,
                 terminal: result.arrivalTerminal
             )
+            // Re-schedule Bark only if no task is running (avoids re-arming on every poll)
+            if arrivalBarkTask == nil {
+                scheduleArrivalBark(flightNumber: flightNumber, arrivalDate: result.arrivalDate,
+                                    airport: result.arrivalAirportName, terminal: result.arrivalTerminal)
+            }
+            scheduleAutoStop(flightStatus: result.flightStatus, arrivalDate: result.arrivalDate)
             await refreshDriving()
         } catch {
             statusMessage = "Refresh failed — retrying in 5 min"
@@ -188,10 +200,11 @@ class AppState: ObservableObject {
                 arrivalDate: arrival,
                 drivingMinutes: minutes
             )
-            // Bark fires at the same time as the Mac notification (leaveByDate - 15 min)
+            // Bark fires at leave-by time minus the configured lead
+            let leadMinutes = Config.leaveByLeadMinutes
             let notifyAt = arrival
                 .addingTimeInterval(-TimeInterval(minutes * 60))
-                .addingTimeInterval(-15 * 60)
+                .addingTimeInterval(-TimeInterval(leadMinutes * 60))
             let delay = notifyAt.timeIntervalSinceNow
             if delay > 0 {
                 let airport  = arrivalAirport
@@ -254,6 +267,51 @@ class AppState: ObservableObject {
         pollingTimer?.invalidate();  pollingTimer  = nil
         positionTimer?.invalidate(); positionTimer = nil
         batteryTimer?.invalidate();  batteryTimer  = nil
+    }
+
+    // MARK: - Scheduled helpers
+
+    /// Schedules a Bark push exactly once at T-1h before arrival.
+    /// Called on tracking start; NOT re-called on every poll (checked at call site).
+    private func scheduleArrivalBark(flightNumber: String, arrivalDate: Date, airport: String, terminal: String?) {
+        arrivalBarkTask?.cancel()
+        arrivalBarkTask = nil
+
+        let remaining = arrivalDate.timeIntervalSinceNow
+        // Only schedule if there's more than 1 hour left; otherwise the immediate
+        // Mac notification already fired and scheduleArrivalNotification handles it.
+        guard remaining > 3600 else { return }
+
+        let delay = remaining - 3600
+        var barkBody = "\(flightNumber) lands at \(airport) in 1 hour (\(arrivalDate.formatted(date: .omitted, time: .shortened)))."
+        if let term = terminal { barkBody += " Terminal \(term)." }
+
+        arrivalBarkTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, self?.isTracking == true else { return }
+            await BarkService.send(title: "✈ Flight arriving in 1 hour", body: barkBody)
+            // Clear the task reference so refreshFlight can re-arm if the arrival time shifts
+            await MainActor.run { self?.arrivalBarkTask = nil }
+        }
+    }
+
+    /// Detects "Landed" / "Arrived" status and schedules an auto-stop 15 min later.
+    private func scheduleAutoStop(flightStatus: String, arrivalDate: Date) {
+        let isLanded = ["landed", "arrived"].contains(flightStatus.lowercased())
+        guard isLanded else { return }
+        guard landedAutoStopTask == nil else { return }  // already scheduled
+
+        // Stop either 15 min after scheduled arrival or 15 min from now, whichever is later.
+        let autoStopAt = max(Date().addingTimeInterval(15 * 60),
+                             arrivalDate.addingTimeInterval(15 * 60))
+        let delay = autoStopAt.timeIntervalSinceNow
+
+        statusMessage = "Landed — auto-stopping tracking in 15 min"
+        landedAutoStopTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await self?.stopTracking()
+        }
     }
 
     // MARK: - Helpers

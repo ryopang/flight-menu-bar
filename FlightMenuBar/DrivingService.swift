@@ -6,8 +6,13 @@ struct DrivingService {
     static let shared = DrivingService()
     private init() {}
 
+    // Cached geocode result. Cleared when the user changes their home address.
     private static var cachedHome: CLLocationCoordinate2D?
-    private static let homeAddress = Secrets.homeAddress
+
+    /// Clears the cached home coordinate so the next fetch re-geocodes.
+    static func clearCache() {
+        cachedHome = nil
+    }
 
     private static let terminalCoordinates: [String: [String: CLLocationCoordinate2D]] = [
         "JFK": [
@@ -73,8 +78,9 @@ struct DrivingService {
 
     private func resolveHome() async -> CLLocationCoordinate2D? {
         if let cached = Self.cachedHome { return cached }
+        let address = Config.homeAddress   // reads UserDefaults or Secrets fallback
         return await withCheckedContinuation { continuation in
-            CLGeocoder().geocodeAddressString(Self.homeAddress) { placemarks, _ in
+            CLGeocoder().geocodeAddressString(address) { placemarks, _ in
                 let coord = placemarks?.first?.location?.coordinate
                 Self.cachedHome = coord
                 continuation.resume(returning: coord)
