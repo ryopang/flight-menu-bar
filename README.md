@@ -3,7 +3,7 @@
 A macOS menu bar app that tracks a live flight and automatically sends GPS navigation to your Tesla when it's time to leave for the airport — so you never miss a pickup.
 
 <p align="center">
-  <img src="screenshots/demo.png" width="320" alt="FlightMenuBar showing UA2301 delayed from Chicago to Newark with live map, leave-by time, and Tesla battery percentage">
+  <img src="screenshots/demo.png" width="320" alt="FlightMenuBar showing UA733 ontime from Vancouver to Newark with live map, leave-by time, and Tesla battery percentage">
 </p>
 
 ---
