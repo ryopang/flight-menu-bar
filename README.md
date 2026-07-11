@@ -191,6 +191,11 @@ In the app's Tesla setup wizard:
 
 ## Changelog
 
+### v1.6.0 — 2026-07-11
+
+- **UI redesign: arrival time as hero** — the arrival time (e.g. "7:08 PM") is now displayed prominently as a large bold element, with the date shown as a small tertiary label above it. Countdown and on-time status appear together on a compact line below.
+- **Settings panel cleanup** — section labels use small uppercase caps, the redundant "Current:" address line is removed, and the leave-by stepper is a single compact inline row. Much less visual clutter.
+
 ### v1.5.0 — 2026-07-06
 
 - **Configurable home address** — set your home address in the new ⚙ Settings panel (footer gear icon) without editing code. Clears the geocode cache and re-fetches driving time immediately.

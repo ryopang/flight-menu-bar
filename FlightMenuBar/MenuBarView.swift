@@ -73,30 +73,35 @@ struct MenuBarView: View {
             }
 
             if let arrival = appState.arrivalDate {
-                VStack(alignment: .leading, spacing: 3) {
-                    // TimelineView confines the once-a-second invalidation to just
-                    // this text; the map and the rest of the popover stay untouched.
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text(Self.countdownString(to: arrival, now: context.date))
-                            .font(.system(.title2, design: .monospaced).weight(.semibold))
-                            .foregroundStyle(Self.countdownColor(to: arrival, now: context.date))
-                    }
-                    Text("Arrives \(appState.formattedArrivalTime)")
+                VStack(alignment: .leading, spacing: 4) {
+                    // Hero: arrival time (time only, date as small label)
+                    Text(arrival.formatted(date: .abbreviated, time: .omitted))
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if appState.scheduledArrivalDate != nil {
-                        if let delay = appState.delayMinutes, delay > 0 {
-                            Text("+\(delay) min")
-                                .font(.caption)
-                                .foregroundStyle(delay >= 60 ? .red : .orange)
-                        } else if appState.hasLiveData {
-                            Text("On time")
-                                .font(.caption)
-                                .foregroundStyle(.green)
-                        } else {
-                            Text("Scheduled time — no live updates yet")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        .foregroundStyle(.tertiary)
+                    Text(arrival.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(.primary)
+                    // Countdown + status on one line
+                    HStack(spacing: 6) {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            Text(Self.countdownString(to: arrival, now: context.date))
+                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                .foregroundStyle(Self.countdownColor(to: arrival, now: context.date))
+                        }
+                        if appState.scheduledArrivalDate != nil {
+                            if let delay = appState.delayMinutes, delay > 0 {
+                                Text("· +\(delay) min")
+                                    .font(.caption)
+                                    .foregroundStyle(delay >= 60 ? .red : .orange)
+                            } else if appState.hasLiveData {
+                                Text("· On time")
+                                    .font(.caption)
+                                    .foregroundStyle(.green)
+                            } else {
+                                Text("· Scheduled")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     if let minutes = appState.drivingMinutes, let arrival = appState.arrivalDate {
@@ -253,56 +258,53 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private var settingsView: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(spacing: 0) {
             Divider()
+                .padding(.bottom, 10)
 
             // Home address
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text("Home Address")
-                    .font(.caption.bold())
+                    .font(.caption2.uppercaseSmallCaps())
+                    .foregroundStyle(.tertiary)
                 HStack(spacing: 6) {
                     TextField(Config.homeAddress, text: $homeAddressInput)
                         .textFieldStyle(.roundedBorder)
                         .font(.caption)
-                    Button("Save") {
-                        saveHomeAddress()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(homeAddressInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button("Save") { saveHomeAddress() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(homeAddressInput.trimmingCharacters(in: .whitespaces).isEmpty
+                                  || homeAddressInput == Config.homeAddress)
                 }
-                Text("Current: \(Config.homeAddress)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
 
+            Divider()
+                .padding(.vertical, 10)
+
             // Leave-by lead time
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Leave-by Notification")
-                    .font(.caption.bold())
-                Stepper(
-                    "Notify \(leadTimeMinutes) min before leave time",
-                    value: $leadTimeMinutes,
-                    in: 0...30,
-                    step: 5
-                )
-                .font(.caption)
-                .onChange(of: leadTimeMinutes) { _, newVal in
-                    UserDefaults.standard.set(newVal, forKey: Config.leaveByLeadMinutesKey)
-                    // Re-schedule the Mac notification with the new lead
-                    if let arrival = appState.arrivalDate, let drive = appState.drivingMinutes {
-                        NotificationManager.shared.scheduleLeaveByNotification(
-                            airport: appState.arrivalAirport,
-                            terminal: appState.arrivalTerminal,
-                            arrivalDate: arrival,
-                            drivingMinutes: drive
-                        )
-                    }
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Leave-by Alert")
+                        .font(.caption2.uppercaseSmallCaps())
+                        .foregroundStyle(.tertiary)
+                    Text("\(leadTimeMinutes) min before departure")
+                        .font(.caption)
                 }
-                Text("How early to ping you before you need to leave")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Spacer()
+                Stepper("", value: $leadTimeMinutes, in: 0...30, step: 5)
+                    .labelsHidden()
+                    .onChange(of: leadTimeMinutes) { _, newVal in
+                        UserDefaults.standard.set(newVal, forKey: Config.leaveByLeadMinutesKey)
+                        if let arrival = appState.arrivalDate, let drive = appState.drivingMinutes {
+                            NotificationManager.shared.scheduleLeaveByNotification(
+                                airport: appState.arrivalAirport,
+                                terminal: appState.arrivalTerminal,
+                                arrivalDate: arrival,
+                                drivingMinutes: drive
+                            )
+                        }
+                    }
             }
         }
         .padding(.top, 2)
