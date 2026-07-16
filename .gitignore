@@ -8,6 +8,10 @@ xcuserdata/
 # Secrets — NEVER commit
 FlightMenuBar/Config.secret.swift
 
+# Built app bundles and distribution artifacts
+*.app
+*.dmg
+
 # macOS
 .DS_Store
 
